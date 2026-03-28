@@ -10,11 +10,15 @@ import (
 	"jobQueue-go/internal/queue"
 	"jobQueue-go/internal/service"
 	"jobQueue-go/pkg/db"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"jobQueue-go/internal/metrics"
 )
 
 func main() {
 	r := gin.Default()
 	db.Init()
+	metrics.Init()
 
 	r.POST("/job", func(c *gin.Context) {
 		var req struct {
@@ -49,5 +53,7 @@ func main() {
 		}
 		c.JSON(200, job)
 	})
+
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	r.Run(":8080")
 }

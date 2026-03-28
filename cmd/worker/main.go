@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -13,6 +14,10 @@ import (
 	"jobQueue-go/internal/queue"
 	"jobQueue-go/internal/service"
 	"jobQueue-go/pkg/db"
+
+	"jobQueue-go/internal/metrics"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const WorkerCount = 5
@@ -35,8 +40,8 @@ func process(job Job) error {
 	time.Sleep(2 * time.Second)
 
 	service.UpdateJobStatus(job.ID, "completed")
-
 	fmt.Println("Completed job:", job.ID)
+
 	return nil
 }
 
@@ -47,10 +52,14 @@ func worker(ctx context.Context, id int, jobs <-chan Job, wg *sync.WaitGroup) {
 		case <-ctx.Done():
 			fmt.Printf("Worker %d shutting down...\n", id)
 			return
-		case job := <-jobs:
+		case job, ok := <-jobs:
+			if !ok {
+				return
+			}
 			fmt.Printf("Worker %d picked job %s\n", id, job.ID)
 			err := process(job)
 			if err != nil {
+				metrics.FailedJobs.Inc()
 				fmt.Println("Job failed", job.ID)
 				job.Retries++
 
@@ -59,7 +68,7 @@ func worker(ctx context.Context, id int, jobs <-chan Job, wg *sync.WaitGroup) {
 					fmt.Println("Job permanently failed:", job.ID)
 				} else {
 					service.UpdateJobStatus(job.ID, "retrying")
-
+					metrics.RetriedJobs.Inc()
 					time.Sleep(3 * time.Second)
 					queue.Enqueue(model.Job{
 						ID:         job.ID,
@@ -70,6 +79,8 @@ func worker(ctx context.Context, id int, jobs <-chan Job, wg *sync.WaitGroup) {
 						MaxRetries: job.MaxRetries,
 					})
 				}
+			} else {
+				metrics.TotalJobs.Inc()
 			}
 		}
 	}
@@ -77,6 +88,13 @@ func worker(ctx context.Context, id int, jobs <-chan Job, wg *sync.WaitGroup) {
 
 func main() {
 	db.Init()
+	metrics.Init()
+
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		http.ListenAndServe(":2112", nil)
+	}()
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	sigChan := make(chan os.Signal, 1)
@@ -86,13 +104,15 @@ func main() {
 
 	var wg sync.WaitGroup
 	for i := 1; i <= WorkerCount; i++ {
+		wg.Add(1)
 		go worker(ctx, i, jobs, &wg)
 	}
 	go func() {
 		<-sigChan
-		fmt.Print("Shutdown signal received...")
+		fmt.Println("Shutdown signal received...")
 
 		cancel()
+		close(jobs)
 	}()
 
 	for {
@@ -119,4 +139,5 @@ func main() {
 
 		}
 	}
+
 }

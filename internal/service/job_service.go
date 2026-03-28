@@ -3,11 +3,15 @@ package service
 import (
 	"jobQueue-go/internal/model"
 	"jobQueue-go/pkg/db"
+	"log"
 )
 
 func CreateJob(job model.Job) error {
 	query := `INSERT INTO jobs (id,type,status,data) VALUES ($1,$2,$3,$4)`
 	_, err := db.DB.Exec(query, job.ID, job.Type, job.Status, job.Data)
+	if err != nil {
+		log.Println("DB INSERT ERROR:", err)
+	}
 	return err
 }
 

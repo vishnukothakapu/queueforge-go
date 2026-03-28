@@ -8,9 +8,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var Ctx = context.Background()
+var (
+	Ctx    = context.Background()
+	Client *redis.Client
+)
 
-func NewClient() *redis.Client {
+func Init() {
 	client := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
@@ -20,12 +23,11 @@ func NewClient() *redis.Client {
 
 		if err == nil {
 			log.Println("Connected to Redis")
-			return client
+			return
 		}
 		log.Println("Waiting for Redis...")
 		time.Sleep(2 * time.Second)
 	}
 
 	log.Fatal("Could not connect to Redis")
-	return nil
 }
